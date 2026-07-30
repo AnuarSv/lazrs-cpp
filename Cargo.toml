@@ -1,0 +1,10 @@
+[package]
+name = "fastlaz"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+las = { version = "0.10", features = ["laz-parallel"] }
