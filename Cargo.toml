@@ -2,6 +2,10 @@
 name = "fastlaz"
 version = "0.1.0"
 edition = "2024"
+description = "C ABI for fast LAS/LAZ point cloud reading in C++, built on the Rust las/laz-rs crates"
+license = "Apache-2.0"
+repository = "https://github.com/AnuarSv/lazrs-cpp"
+readme = "README.md"
 
 [lib]
 crate-type = ["cdylib"]
