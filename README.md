@@ -4,41 +4,44 @@ A small C compatible library that exposes fast LAS/LAZ point cloud reading to C+
 
 ## Why this exists
 
-LAZ is the standard compressed format for LiDAR and mobile laser scanning point clouds, and reading it fast matters once files reach hundreds of millions of points. The common C++ options are PDAL, which is general purpose and carries real overhead for a task this narrow, or the older LASzip library. Benchmarking a 24.5 million point file showed that a naive PDAL based C++ reader took 6.65 seconds, while Python through laspy using the Rust based lazrs backend took 2.99 seconds. That gap is not about C++ versus Python as languages, it comes down to which underlying implementation is doing the decompression and how the data is pulled out of it afterwards.
+LAZ is the standard compressed format for LiDAR and mobile laser scanning point clouds, and reading it fast matters once files reach hundreds of millions of points. The common C++ option is PDAL, which is general purpose and carries real overhead for a task this narrow: reading a 202.8 million point file and extracting X, Y, Z takes PDAL 151 seconds and 13.4 GB of peak memory in the benchmarks below, against 15.35 seconds and 4.9 GB for this library. That gap is not about C++ versus other languages, it comes down to which underlying implementation is doing the decompression, how the data is pulled out of it afterwards, and how carefully memory is managed while that happens.
 
-This library calls into the Rust las crate directly from C++, using its bulk read path (parallel LAZ decompression via the laz-parallel feature) and its columnar field accessors (reading only the classification field straight out of the decoded buffer instead of decoding a full point struct per record). The result reads the same file in 1.82 seconds, faster than every other approach tested.
+This library calls into the Rust las crate directly from C++, using its bulk read path (parallel LAZ decompression via the laz-parallel feature), its columnar field accessors (reading a field straight out of the decoded buffer instead of decoding a full point struct per record), and chunked reads that keep peak memory well below what a single bulk read needs. The numbers below are measured, not assumed, including the cases where the advantage turned out to be smaller than expected or nonexistent.
 
 ## Benchmark
 
-All numbers are from the same 24.5 million point file, measured with isolated process runs and peak resident memory via getrusage.
+All numbers are isolated process runs (peak resident memory via getrusage), on the same two files: a 24.5 million point file and a 202.8 million point (1.6 GB) file. Every approach measured does the same amount of work as `fastlaz`: it only reads what that function reads, nothing extra. The fastest result in each table is in **bold**.
 
-| approach | time | peak memory |
+### Reading classification
+
+`fastlaz_read_and_count` decompresses a file and counts points per classification value.
+
+| approach | 24.5M points | 202.8M points |
 |---|---|---|
-| C++ with Rust las crate, naive point-by-point iteration | 11.36 s | - |
-| Python with PDAL bindings | 10.09 s | 3308 MB |
-| C++ with PDAL | 6.65 s | 1621 MB |
-| Python with laspy and lazrs | 2.99 s | 1693 MB |
-| C++ with Rust las crate, bulk read and columnar access | 1.82 s | 1086 MB |
+| **fastlaz** | **1.82 s / 1086 MB** | 19.5 s / 8.6 GB |
+| Python, laspy + lazrs | 2.32 s / 1124 MB | **17.6 s / 8.7 GB** |
+| C++, naive Rust las crate (point-by-point) | 11.36 s / - | not tested |
+| Python, PDAL bindings | 10.09 s / 3308 MB | not tested |
+| C++, PDAL | 6.65 s / 1621 MB | 111.6 s / 11.1 GB |
 
-The naive Rust attempt is included on purpose. Calling a fast library the slow way still gives slow results, the win came from using the bulk and columnar APIs rather than from Rust itself.
+This one is close, and at the larger size Python edges ahead. Both `fastlaz` and laspy's lazrs backend decompress the exact same way under the hood (the LAZ codec doesn't skip fields it isn't asked for, the whole point record gets decompressed regardless), so this benchmark is really measuring small differences in decompression parallelism and per-point extraction overhead, not a fundamental advantage. Included for completeness rather than as a selling point.
 
-## Benchmark at larger scale
+### Reading X, Y, Z coordinates
 
-The numbers above are from a 24.5 million point file. To check whether the gap holds up on real, larger data, the same three approaches were measured again on a 1.6 GB file with 202.8 million points, using the same isolated process methodology.
+`fastlaz_read_xyz` decompresses a file and fills X, Y, Z arrays. This is the more useful operation in practice, and where the library's actual advantage shows up.
 
-| approach | time | peak memory |
+| approach | 24.5M points | 202.8M points |
 |---|---|---|
-| C++ with Rust las crate, bulk read and columnar access | 19.5 s | 8.6 GB |
-| Python with laspy and lazrs | 40.7 s | 12.5 GB |
-| C++ with PDAL | 111.6 s | 11.1 GB |
+| **fastlaz** | **1.91 s / 832 MB** | **15.35 s / 4.9 GB** |
+| C++, native Rust las crate, no chunking | 2.09 s / 1648 MB | 17.12 s / 13.3 GB |
+| Python, laspy + lazrs | 2.39 s / 1668 MB | 19.31 s / 13.2 GB |
+| C++, PDAL | 7.48 s / 2386 MB | 151.15 s / 13.4 GB |
 
-The gap does not shrink at this size, it widens. At 24.5 million points this library was 3.65x faster than the PDAL based reader and 1.64x faster than Python. At 202.8 million points that is 5.7x and 2.1x. Peak memory also stays well below both alternatives, which matters once files get large enough that memory becomes the actual limit on a given machine.
+The time advantage over Python and plain Rust is modest, 10 to 25 percent. The memory advantage is not: at 202.8 million points `fastlaz` uses roughly a third of the memory every other approach needs, including plain Rust with no chunking. That gap is explained below. Against PDAL specifically, both time and memory diverge sharply at scale.
 
-## Reading coordinates
+## How it stays memory efficient
 
-`fastlaz_read_and_count` only reads the classification field, which is enough to inspect a file but not to do anything with the geometry. Two more functions cover that: `fastlaz_point_count` reads just the header to report how many points a file has, without decompressing any point data, and `fastlaz_read_xyz` fills caller allocated X, Y, Z arrays sized from that count.
-
-The point data is read in bounded chunks (5 million points at a time) rather than all at once. Reading the whole file into one buffer and then copying it into separate X, Y, Z arrays means holding both the raw buffer and the arrays in memory at the same time, which roughly doubles peak memory for no benefit. Chunked reading keeps only one chunk's raw buffer alive at a time, which on a 202.8 million point file cut peak memory from 12.4 GB to 6.4 GB and, since the process was no longer swapping, cut load time from 41 seconds to 17 seconds as a side effect.
+Point data is read in bounded chunks (5 million points at a time) rather than all at once. Reading the whole file into one buffer and then copying it into separate X, Y, Z arrays means holding both the raw buffer and the arrays in memory at the same time, which roughly doubles peak memory for no benefit, and that doubling is exactly what the "native Rust, no chunking" row above shows costing 13.3 GB instead of 4.9 GB. Chunked reading keeps only one chunk's raw buffer alive at a time. On the 202.8 million point file, switching to chunked reads cut peak memory from 12.4 GB to 6.4 GB in an earlier version of this benchmark, and cut load time from 41 seconds to 17 seconds as a side effect, because the process was no longer swapping.
 
 ## What this project is and is not
 
