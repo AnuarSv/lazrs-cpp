@@ -1,6 +1,6 @@
 [package]
 name = "fastlaz"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 description = "C ABI for fast LAS/LAZ point cloud reading in C++, built on the Rust las/laz-rs crates"
 license = "Apache-2.0"

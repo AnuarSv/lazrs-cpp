@@ -1,5 +1,10 @@
 # lazrs-cpp
 
+[![crates.io](https://img.shields.io/crates/v/fastlaz.svg)](https://crates.io/crates/fastlaz)
+[![docs.rs](https://img.shields.io/docsrs/fastlaz)](https://docs.rs/fastlaz)
+[![CI](https://github.com/AnuarSv/lazrs-cpp/actions/workflows/ci.yml/badge.svg)](https://github.com/AnuarSv/lazrs-cpp/actions/workflows/ci.yml)
+[![license](https://img.shields.io/crates/l/fastlaz.svg)](LICENSE)
+
 A small C compatible library that exposes fast LAS/LAZ point cloud reading to C++, built on top of the Rust las crate (which itself wraps laz-rs for LAZ decompression).
 
 ## Why this exists
@@ -49,17 +54,21 @@ The actual LAS parsing and LAZ decompression is done entirely by the las crate (
 
 ## Building
 
-Requires a Rust toolchain and a C++ compiler.
+Requires a Rust toolchain (edition 2024, rustc 1.85 or newer) and a C++ compiler.
 
+```sh
 cargo build --release
+```
 
-This produces target/release/libfastlaz.so and a header at include/fastlaz.h (regenerate it with cbindgen if the Rust API changes).
+This produces `target/release/libfastlaz.so` and a header at `include/fastlaz.h` (regenerate it with `cbindgen` if the Rust API changes).
 
 To build and run the example:
 
+```sh
 cd example
 g++ -std=c++17 -O2 example.cpp -o example_bin -I../include -I../target/release -L../target/release -lfastlaz -Wl,-rpath,'$ORIGIN/../target/release'
 ./example_bin path/to/file.laz
+```
 
 ## License
 
