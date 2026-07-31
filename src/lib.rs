@@ -42,3 +42,91 @@ pub extern "C" fn fastlaz_read_and_count(
 
     0
 }
+
+/// Returns the number of points in a LAS/LAZ file by reading only the header.
+/// Returns -1 on error.
+#[unsafe(no_mangle)]
+pub extern "C" fn fastlaz_point_count(filename: *const c_char) -> i64 {
+    let filename = unsafe {
+        match CStr::from_ptr(filename).to_str() {
+            Ok(s) => s,
+            Err(_) => return -1,
+        }
+    };
+
+    let reader = match las::Reader::from_path(filename) {
+        Ok(r) => r,
+        Err(_) => return -1,
+    };
+
+    reader.header().number_of_points() as i64
+}
+
+/// Reads X, Y, Z coordinates from a LAS/LAZ file into caller-allocated buffers.
+///
+/// `x_out`, `y_out`, `z_out` must each point to an already-allocated array of
+/// `capacity` f64 values (get `capacity` from `fastlaz_point_count` first).
+/// Returns the number of points written, or -1 on error, or -2 if `capacity`
+/// is smaller than the file's point count.
+#[unsafe(no_mangle)]
+pub extern "C" fn fastlaz_read_xyz(
+    filename: *const c_char,
+    x_out: *mut f64,
+    y_out: *mut f64,
+    z_out: *mut f64,
+    capacity: u64,
+) -> i64 {
+    let filename = unsafe {
+        match CStr::from_ptr(filename).to_str() {
+            Ok(s) => s,
+            Err(_) => return -1,
+        }
+    };
+
+    let mut reader = match las::Reader::from_path(filename) {
+        Ok(r) => r,
+        Err(_) => return -1,
+    };
+
+    if reader.header().number_of_points() > capacity {
+        return -2;
+    }
+
+    let x = unsafe { std::slice::from_raw_parts_mut(x_out, capacity as usize) };
+    let y = unsafe { std::slice::from_raw_parts_mut(y_out, capacity as usize) };
+    let z = unsafe { std::slice::from_raw_parts_mut(z_out, capacity as usize) };
+
+    // Read in bounded chunks so the raw decompressed buffer for one chunk
+    // is freed before the next chunk is decompressed, instead of holding
+    // the whole file's raw point records and the x/y/z arrays at once.
+    const CHUNK: u64 = 5_000_000;
+    let mut point_data = las::PointDataBuilder::new()
+        .for_header(reader.header())
+        .build();
+    let mut total: i64 = 0;
+
+    loop {
+        let filled = match reader.fill_points(CHUNK, &mut point_data) {
+            Ok(n) => n,
+            Err(_) => return -1,
+        };
+        if filled == 0 {
+            break;
+        }
+
+        let offset = total as usize;
+        for (i, ((xv, yv), zv)) in point_data
+            .x()
+            .zip(point_data.y())
+            .zip(point_data.z())
+            .enumerate()
+        {
+            x[offset + i] = xv;
+            y[offset + i] = yv;
+            z[offset + i] = zv;
+        }
+        total += filled as i64;
+    }
+
+    total
+}

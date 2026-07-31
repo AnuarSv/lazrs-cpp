@@ -34,9 +34,15 @@ The numbers above are from a 24.5 million point file. To check whether the gap h
 
 The gap does not shrink at this size, it widens. At 24.5 million points this library was 3.65x faster than the PDAL based reader and 1.64x faster than Python. At 202.8 million points that is 5.7x and 2.1x. Peak memory also stays well below both alternatives, which matters once files get large enough that memory becomes the actual limit on a given machine.
 
+## Reading coordinates
+
+`fastlaz_read_and_count` only reads the classification field, which is enough to inspect a file but not to do anything with the geometry. Two more functions cover that: `fastlaz_point_count` reads just the header to report how many points a file has, without decompressing any point data, and `fastlaz_read_xyz` fills caller allocated X, Y, Z arrays sized from that count.
+
+The point data is read in bounded chunks (5 million points at a time) rather than all at once. Reading the whole file into one buffer and then copying it into separate X, Y, Z arrays means holding both the raw buffer and the arrays in memory at the same time, which roughly doubles peak memory for no benefit. Chunked reading keeps only one chunk's raw buffer alive at a time, which on a 202.8 million point file cut peak memory from 12.4 GB to 6.4 GB and, since the process was no longer swapping, cut load time from 41 seconds to 17 seconds as a side effect.
+
 ## What this project is and is not
 
-The actual LAS parsing and LAZ decompression is done entirely by the las crate (github.com/gadomski/las-rs), which depends on laz-rs for the compression codec, both by Alexandre Montaigu, licensed under Apache 2.0. This repository does not reimplement any of that. What it adds is the C ABI surface (`fastlaz_read_and_count`) and the specific access pattern that makes the underlying library fast to use from a C or C++ codebase, along with a generated header via cbindgen and a small example program.
+The actual LAS parsing and LAZ decompression is done entirely by the las crate (github.com/gadomski/las-rs), which depends on laz-rs for the compression codec, both by Alexandre Montaigu, licensed under Apache 2.0. This repository does not reimplement any of that. What it adds is the C ABI surface (`fastlaz_read_and_count`, `fastlaz_point_count`, `fastlaz_read_xyz`) and the specific access patterns that make the underlying library fast and memory efficient to use from a C or C++ codebase, along with a generated header via cbindgen and example programs.
 
 ## Building
 
