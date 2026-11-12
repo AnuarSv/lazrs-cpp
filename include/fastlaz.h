@@ -28,4 +28,16 @@ int64_t fastlaz_read_xyz(const char *filename,
                          double *z_out,
                          uint64_t capacity);
 
+/// Reads R, G, B color into caller-allocated buffers.
+///
+/// `r_out`, `g_out`, `b_out` must each point to an already-allocated array of
+/// `capacity` u16 values (get `capacity` from `fastlaz_point_count` first).
+/// Returns the number of points written, or -1 on error, -2 if `capacity` is
+/// smaller than the file's point count, or -3 if the file has no color data.
+int64_t fastlaz_read_rgb(const char *filename,
+                         uint16_t *r_out,
+                         uint16_t *g_out,
+                         uint16_t *b_out,
+                         uint64_t capacity);
+
 }  // extern "C"

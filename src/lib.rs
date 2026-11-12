@@ -130,3 +130,69 @@ pub extern "C" fn fastlaz_read_xyz(
 
     total
 }
+
+/// Reads R, G, B color into caller-allocated buffers.
+///
+/// `r_out`, `g_out`, `b_out` must each point to an already-allocated array of
+/// `capacity` u16 values (get `capacity` from `fastlaz_point_count` first).
+/// Returns the number of points written, or -1 on error, -2 if `capacity` is
+/// smaller than the file's point count, or -3 if the file has no color data.
+#[unsafe(no_mangle)]
+pub extern "C" fn fastlaz_read_rgb(
+    filename: *const c_char,
+    r_out: *mut u16,
+    g_out: *mut u16,
+    b_out: *mut u16,
+    capacity: u64,
+) -> i64 {
+    let filename = unsafe {
+        match CStr::from_ptr(filename).to_str() {
+            Ok(s) => s,
+            Err(_) => return -1,
+        }
+    };
+
+    let mut reader = match las::Reader::from_path(filename) {
+        Ok(r) => r,
+        Err(_) => return -1,
+    };
+
+    if reader.header().number_of_points() > capacity {
+        return -2;
+    }
+
+    let r = unsafe { std::slice::from_raw_parts_mut(r_out, capacity as usize) };
+    let g = unsafe { std::slice::from_raw_parts_mut(g_out, capacity as usize) };
+    let b = unsafe { std::slice::from_raw_parts_mut(b_out, capacity as usize) };
+
+    const CHUNK: u64 = 5_000_000;
+    let mut point_data = las::PointDataBuilder::new()
+        .for_header(reader.header())
+        .build();
+    let mut total: i64 = 0;
+
+    loop {
+        let filled = match reader.fill_points(CHUNK, &mut point_data) {
+            Ok(n) => n,
+            Err(_) => return -1,
+        };
+        if filled == 0 {
+            break;
+        }
+
+        let rgb = match point_data.rgb() {
+            Some(iter) => iter,
+            None => return -3,
+        };
+
+        let offset = total as usize;
+        for (i, (rv, gv, bv)) in rgb.enumerate() {
+            r[offset + i] = rv;
+            g[offset + i] = gv;
+            b[offset + i] = bv;
+        }
+        total += filled as i64;
+    }
+
+    total
+}
